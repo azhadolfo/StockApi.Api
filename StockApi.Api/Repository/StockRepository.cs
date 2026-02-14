@@ -16,7 +16,7 @@ namespace StockApi.Api.Repository
             _dbContext = dbContext;
         }
 
-        public async Task<List<Stock>> GetAllAsync(QueryObject query)
+        public async Task<List<Stock>> GetAllAsync(QueryObject query, CancellationToken cancellationToken = default)
         {
             var stocks = _dbContext.Stocks.Include(s => s.Comments).AsQueryable();
 
@@ -40,58 +40,89 @@ namespace StockApi.Api.Repository
 
             var skipNumber = (query.PageNumber - 1) * query.PageSize;
 
-            return await stocks.Skip(skipNumber).Take(query.PageSize).ToListAsync();
+            return await stocks.Skip(skipNumber).Take(query.PageSize).ToListAsync(cancellationToken);
         }
 
-        public async Task<Stock?> GetByIdAsync(int id)
+        public async Task<Stock?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Stocks.Include(c => c.Comments).FirstOrDefaultAsync(s => s.Id == id);
+            return await _dbContext.Stocks.Include(c => c.Comments).FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
         }
 
-        public async Task<Stock> CreateAsync(Stock stockModel)
+        public async Task<Stock> CreateAsync(Stock stockModel, CancellationToken cancellationToken = default)
         {
-            await _dbContext.Stocks.AddAsync(stockModel);
-            await _dbContext.SaveChangesAsync();
-            return stockModel;
-        }
-
-        public async Task<Stock?> UpdateAsync(int id, UpdateStockDto stockDto)
-        {
-            var stock = await _dbContext.Stocks.FirstOrDefaultAsync(s => s.Id == id);
-
-            if (stock == null)
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            try
             {
-                return null;
+                await _dbContext.Stocks.AddAsync(stockModel);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return stockModel;
             }
-
-            stock.Symbol = stockDto.Symbol;
-            stock.CompanyName = stockDto.CompanyName;
-            stock.Purchase = stockDto.Purchase;
-            stock.LastDiv = stockDto.LastDiv;
-            stock.Industry = stockDto.Industry;
-            stock.MarketCap = stockDto.MarketCap;
-
-            await _dbContext.SaveChangesAsync();
-            return stock;
-        }
-
-        public async Task<Stock?> DeleteAsync(int id)
-        {
-            var stock = await _dbContext.Stocks.FirstOrDefaultAsync(s => s.Id == id);
-
-            if (stock == null)
+            catch
             {
-                return null;
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
             }
-
-            _dbContext.Remove(stock);
-            await _dbContext.SaveChangesAsync();
-            return stock;
         }
 
-        public async Task<bool> IsStockExistAsync(int id)
+        public async Task<Stock?> UpdateAsync(int id, UpdateStockDto stockDto, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Stocks.AnyAsync(s => s.Id == id);
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            try
+            {
+                var stock = await _dbContext.Stocks.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+
+                if (stock == null)
+                {
+                    return null;
+                }
+
+                stock.Symbol = stockDto.Symbol;
+                stock.CompanyName = stockDto.CompanyName;
+                stock.Purchase = stockDto.Purchase;
+                stock.LastDiv = stockDto.LastDiv;
+                stock.Industry = stockDto.Industry;
+                stock.MarketCap = stockDto.MarketCap;
+
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return stock;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        public async Task<Stock?> DeleteAsync(int id, CancellationToken cancellationToken = default)
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var stock = await _dbContext.Stocks.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+
+                if (stock == null)
+                {
+                    return null;
+                }
+
+                _dbContext.Remove(stock);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return stock;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        public async Task<bool> IsStockExistAsync(int id, CancellationToken cancellationToken = default)
+        {
+            return await _dbContext.Stocks.AnyAsync(s => s.Id == id, cancellationToken);
         }
     }
 }
